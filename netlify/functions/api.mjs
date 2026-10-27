@@ -33,13 +33,23 @@ export default async (req) => {
     if (!okKey(b.key)) return J({ error: "wrong edit key" }, 403);
     const events = b.events && typeof b.events === "object" ? b.events : {};
     const polls = Array.isArray(b.polls) ? b.polls.slice(0, 30) : [];
+    // files = uploaded PDFs {id,name} or web links {name,url}
     const files = Array.isArray(b.files)
-      ? b.files.filter((f) => f && /^[a-f0-9]{16}$/.test(f.id) && typeof f.name === "string").slice(0, 200).map((f) => ({ id: f.id, name: f.name.slice(0, 80) }))
+      ? b.files
+          .map((f) => {
+            if (!f || typeof f.name !== "string") return null;
+            const name = f.name.slice(0, 80);
+            if (typeof f.id === "string" && /^[a-f0-9]{16}$/.test(f.id)) return { id: f.id, name };
+            if (typeof f.url === "string" && f.url.length <= 2000 && /^https?:\/\//i.test(f.url)) return { name, url: f.url };
+            return null;
+          })
+          .filter(Boolean)
+          .slice(0, 200)
       : [];
     if (JSON.stringify({ events, polls, files }).length > 400000) return J({ error: "too big" }, 413);
     // delete PDFs that were removed from the Files list (and aren't attached to an event)
     const keep = new Set([...files.map((f) => f.id), ...Object.values(events).flat().map((e) => e?.file?.id)]);
-    for (const f of state.files || []) if (!keep.has(f.id)) await getStore("cysec-files").delete(f.id);
+    for (const f of state.files || []) if (f.id && !keep.has(f.id)) await getStore("cysec-files").delete(f.id);
     await store.setJSON("state", { events, polls, files });
     const ids = new Set(polls.map((p) => p.id));
     for (const v of Object.values(votes))
